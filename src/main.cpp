@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <boost/asio.hpp>
 #include <boost/thread.hpp>
+#include "message.pb.h"
 
 #define DEBUG
 
@@ -79,7 +80,6 @@ public:
 
     void accept_message()
     {
-        auto self(shared_from_this());
         socket.close();
         chat.on_user_leave(this);
     }

@@ -1,3 +1,10 @@
+/src/message.pb.cc
+/src/message.pb.h
+/chat-with-asio.pro
+/chat-with-asio.pro.user
+/deployment.pri
+/protobuf/
+/boost/
 # Compiled Object files
 *.slo
 *.lo
