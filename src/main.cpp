@@ -6,9 +6,8 @@
 #include <boost/thread.hpp>
 #include "message.pb.h"
 
-#define DEBUG
-
 using namespace boost::asio;
+using ru::spbau::chat::commons::protocol::Message;
 
 class chat_user
 {

@@ -1,3 +1,4 @@
+/chat_server
 /src/message.pb.cc
 /src/message.pb.h
 /chat-with-asio.pro
