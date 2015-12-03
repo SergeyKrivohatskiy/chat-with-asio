@@ -2,7 +2,7 @@ Asynch chat with boost asio
 ===========================
 
 ## Dependencies:
-###### Single command for dependencies installation for ubuntu: `sudo apt-get install curl autoreconf libtool gcc g++`
+###### Single command for dependencies installation for ubuntu: `sudo apt-get install curl autoconf libtool gcc g++`
 ###### All dependencies
 - `curl` - used by protobuf autoconfiguration script
 - `autoconf` - https://en.wikipedia.org/wiki/Autoconf
