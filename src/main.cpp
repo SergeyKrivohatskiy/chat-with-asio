@@ -15,11 +15,21 @@ using google::protobuf::io::CodedOutputStream;
 using google::protobuf::uint8;
 using google::protobuf::uint32;
 
+typedef std::pair<size_t, std::shared_ptr<uint8>> serialized_message;
+
+#ifdef DEBUG
+static size_t const INITIAL_BUFFER_SIZE = 1 << 2; // 4 b
+#else
+static size_t const INITIAL_BUFFER_SIZE = 1 << 12; // 4 Kb
+#endif
+static size_t const MESSAGES_IN_QUEUE_TO_FALLBACK = 1 << 12;
+static size_t const MAX_VARINT_BYTES = 10;
+
 class chat_user
 {
 public:
     virtual void accept_message_size() = 0;
-    virtual void deliver_message(std::shared_ptr<Message> const &message) = 0;
+    virtual void deliver_message(serialized_message const &message) = 0;
 };
 typedef std::shared_ptr<chat_user> user_ptr;
 
@@ -60,10 +70,17 @@ public:
 
     void deliver_message_to_all(std::shared_ptr<Message> const &message)
     {
+        size_t msg_size = message->ByteSize();
+        size_t size = msg_size + MAX_VARINT_BYTES;
+        std::shared_ptr<uint8> buffer(new uint8[size]);
+        auto it = CodedOutputStream::WriteVarint32ToArray(msg_size, buffer.get());
+        bool written = message->SerializeToArray(it, msg_size);
+        assert(written);
+        serialized_message message_serialized(msg_size + (it - buffer.get()), buffer);
         rw_mutex.lock_shared();
         for(auto &user_p: users)
         {
-            user_p->deliver_message(message);
+            user_p->deliver_message(message_serialized);
         }
         rw_mutex.unlock_shared();
     }
@@ -72,14 +89,6 @@ private:
     std::vector<user_ptr> users;
     boost::shared_mutex rw_mutex;
 };
-
-#ifdef DEBUG
-static size_t const INITIAL_BUFFER_SIZE = 1 << 2; // 4 b
-#else
-static size_t const INITIAL_BUFFER_SIZE = 1 << 12; // 4 Kb
-#endif
-static size_t const MESSAGES_IN_QUEUE_TO_FALLBACK = 1 << 12;
-static size_t const MAX_VARINT_BYTES = 10;
 
 class user :
         public chat_user,
@@ -215,7 +224,7 @@ public:
             });
     }
 
-    void deliver_message(std::shared_ptr<Message> const &message)
+    void deliver_message(serialized_message const &message)
     {
         bool do_poll_here;
         {
@@ -265,7 +274,7 @@ private:
     void do_write()
     {
         boost::lock_guard<boost::mutex> guard(deliver_queue_mutex);
-        size_t min_size = messages_to_deliver.front()->ByteSize() + MAX_VARINT_BYTES;
+        size_t min_size = messages_to_deliver.front().first;
         if (write_buffer.size() < min_size)
         {
             write_buffer.resize(min_size);
@@ -273,20 +282,16 @@ private:
         size_t write_buffer_offset = 0;
         while (!messages_to_deliver.empty())
         {
-            std::shared_ptr<Message> const &message = messages_to_deliver.front();
-            size_t byte_size = message->ByteSize();
-            if (byte_size + MAX_VARINT_BYTES > write_buffer.size() - write_buffer_offset)
+            serialized_message const &message = messages_to_deliver.front();
+            if (message.first > write_buffer.size() - write_buffer_offset)
             {
                 break;
             }
 #ifdef DEBUG
             std::cout << "message written" << std::endl;
 #endif
-            auto it = CodedOutputStream::WriteVarint32ToArray(byte_size, write_buffer.data() + write_buffer_offset);
-            write_buffer_offset = it - write_buffer.data();
-            bool written = message->SerializeToArray(write_buffer.data() + write_buffer_offset, byte_size);
-            write_buffer_offset += byte_size;
-            assert(written);
+            memcpy(write_buffer.data() + write_buffer_offset, message.second.get(), message.first);
+            write_buffer_offset += message.first;
             messages_to_deliver.pop();
         }
 
@@ -325,7 +330,7 @@ private:
     size_t buffer_offset;
     size_t buffer_red;
     std::vector<uint8> write_buffer;
-    std::queue<std::shared_ptr<Message>> messages_to_deliver;
+    std::queue<serialized_message> messages_to_deliver;
     boost::mutex deliver_queue_mutex;
     bool write_in_progress;
 };
