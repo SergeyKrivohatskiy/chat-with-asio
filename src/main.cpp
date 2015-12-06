@@ -78,6 +78,7 @@ static size_t const INITIAL_BUFFER_SIZE = 1 << 2; // 4 b
 #else
 static size_t const INITIAL_BUFFER_SIZE = 1 << 12; // 4 Kb
 #endif
+static size_t const MESSAGES_IN_QUEUE_TO_FALLBACK = 1 << 12;
 static size_t const MAX_VARINT_BYTES = 10;
 
 class user :
@@ -216,15 +217,22 @@ public:
 
     void deliver_message(std::shared_ptr<Message> const &message)
     {
-        boost::lock_guard<boost::mutex> guard(deliver_queue_mutex);
-        messages_to_deliver.push(message);
-        if (write_in_progress)
+        bool do_poll_here;
         {
-            return;
+            boost::lock_guard<boost::mutex> guard(deliver_queue_mutex);
+            messages_to_deliver.push(message);
+            if (!write_in_progress)
+            {
+                write_in_progress = true;
+                auto ancor(shared_from_this());
+                service.post([this, ancor](){do_write();});
+            }
+            do_poll_here = messages_to_deliver.size() >= MESSAGES_IN_QUEUE_TO_FALLBACK;
         }
-        write_in_progress = true;
-        auto ancor(shared_from_this());
-        service.post([this, ancor](){do_write();});
+        if (do_poll_here)
+        {
+            service.poll_one();
+        }
     }
 
     ~user()
