@@ -96,7 +96,6 @@ public:
             write_buffer(std::max(INITIAL_BUFFER_SIZE, MAX_VARINT_BYTES)),
             write_in_progress(false)
     {
-        assert(socket.is_open());
     }
 
     void accept_message_size()
@@ -267,14 +266,14 @@ private:
         while (!messages_to_deliver.empty())
         {
             std::shared_ptr<Message> const &message = messages_to_deliver.front();
-            if (message->ByteSize() + MAX_VARINT_BYTES > write_buffer.size() - write_buffer_offset)
+            size_t byte_size = message->ByteSize();
+            if (byte_size + MAX_VARINT_BYTES > write_buffer.size() - write_buffer_offset)
             {
                 break;
             }
 #ifdef DEBUG
             std::cout << "message written" << std::endl;
 #endif
-            size_t byte_size = message->ByteSize();
             auto it = CodedOutputStream::WriteVarint32ToArray(byte_size, write_buffer.data() + write_buffer_offset);
             write_buffer_offset = it - write_buffer.data();
             bool written = message->SerializeToArray(write_buffer.data() + write_buffer_offset, byte_size);
@@ -296,12 +295,15 @@ private:
                 chat.on_user_leave(shared_from_this());
                 return;
             } else {
-                boost::lock_guard<boost::mutex> guard(deliver_queue_mutex);
-                if (!messages_to_deliver.empty()) {
-                    service.post([this, ancor](){do_write();});
-                } else {
-                    write_in_progress = false;
+                {
+                    boost::lock_guard<boost::mutex> guard(deliver_queue_mutex);
+                    if (messages_to_deliver.empty())
+                    {
+                        write_in_progress = false;
+                        return;
+                    }
                 }
+                do_write();
             }
         });
 
@@ -372,8 +374,8 @@ int main(int argc, char *argv[])
                   << " ..."
                   << std::endl;
 
-        chat_room chat;
         io_service service(concurrency_level);
+        chat_room chat;
 
         connection_handler handler(service, port, chat);
         handler.accept_new_connection();
