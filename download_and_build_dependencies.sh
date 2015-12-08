@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 #protobuf
 git clone https://github.com/google/protobuf.git
 cd protobuf
