@@ -352,8 +352,11 @@ public:
     {
         acc.async_accept(sock, [this](boost::system::error_code)
         {
-            assert(sock.is_open());
-            chat.add_new_user(std::make_shared<user>(std::move(sock), chat, service));
+            if (sock.is_open())
+            {
+                sock.set_option(ip::tcp::no_delay(true));
+                chat.add_new_user(std::make_shared<user>(std::move(sock), chat, service));
+            }
             accept_new_connection();
         });
     }
