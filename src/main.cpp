@@ -29,7 +29,7 @@ class chat_user
 {
 public:
     virtual void accept_message_size() = 0;
-    virtual void deliver_message(serialized_message const &message) = 0;
+    virtual bool deliver_message(serialized_message const &message) = 0;
 };
 typedef std::shared_ptr<chat_user> user_ptr;
 
@@ -68,7 +68,7 @@ public:
 #endif
     }
 
-    void deliver_message_to_all(std::shared_ptr<Message> const &message)
+    size_t deliver_message_to_all(std::shared_ptr<Message> const &message)
     {
         size_t msg_size = message->ByteSize();
         size_t size = msg_size + MAX_VARINT_BYTES;
@@ -77,12 +77,14 @@ public:
         bool written = message->SerializeToArray(it, msg_size);
         assert(written);
         serialized_message message_serialized(msg_size + (it - buffer.get()), buffer);
+        size_t overflow_queues = 0;
         rw_mutex.lock_shared();
         for(auto &user_p: users)
         {
-            user_p->deliver_message(message_serialized);
+            overflow_queues += user_p->deliver_message(message_serialized);
         }
         rw_mutex.unlock_shared();
+        return overflow_queues;
     }
 
 private:
@@ -169,30 +171,35 @@ public:
 
         if (buffer_red >= message_size)
         {
+            std::shared_ptr<Message> message(new Message());
+            try
             {
-                std::shared_ptr<Message> message(new Message());
-                try
-                {
-                    message->ParseFromArray(message_buffer.data() + buffer_offset,
-                                           message_size);
-                } catch (std::exception &) {
-        #ifdef DEBUG
-                    std::cout << "Failed to parse protobuf message" << std::endl;
-        #endif
-                    chat.on_user_leave(shared_from_this());
-                    return;
-                }
-                buffer_offset += message_size;
-                buffer_red -= message_size;
-
+                message->ParseFromArray(message_buffer.data() + buffer_offset,
+                                       message_size);
+            } catch (std::exception &) {
     #ifdef DEBUG
+                std::cout << "Failed to parse protobuf message" << std::endl;
+    #endif
+                chat.on_user_leave(shared_from_this());
+                return;
+            }
+            buffer_offset += message_size;
+            buffer_red -= message_size;
+
+#ifdef DEBUG
             std::cout << "message red ["
                       << (message->has_type() ? message->type() : -1) << ", "
                       << (message->has_author() ? message->author() : "no author") << ", "
                       << (message->text_size() ? message->text(0) : "no text")
                       << "]" << std::endl;
-    #endif
-                chat.deliver_message_to_all(message);
+#endif
+            size_t busy_factor = chat.deliver_message_to_all(message);
+            for (size_t idx = 0; idx < busy_factor; ++idx)
+            {
+                if (!service.poll_one())
+                {
+                    break;
+                }
             }
             accept_message_size();
             return;
@@ -224,24 +231,17 @@ public:
             });
     }
 
-    void deliver_message(serialized_message const &message)
+    bool deliver_message(serialized_message const &message)
     {
-        bool do_poll_here;
+        boost::lock_guard<boost::mutex> guard(deliver_queue_mutex);
+        messages_to_deliver.push(message);
+        if (!write_in_progress)
         {
-            boost::lock_guard<boost::mutex> guard(deliver_queue_mutex);
-            messages_to_deliver.push(message);
-            if (!write_in_progress)
-            {
-                write_in_progress = true;
-                auto ancor(shared_from_this());
-                service.post([this, ancor](){do_write();});
-            }
-            do_poll_here = messages_to_deliver.size() >= MESSAGES_IN_QUEUE_TO_FALLBACK;
+            write_in_progress = true;
+            auto ancor(shared_from_this());
+            service.post([this, ancor](){do_write();});
         }
-        if (do_poll_here)
-        {
-            service.poll_one();
-        }
+        return messages_to_deliver.size() >= MESSAGES_IN_QUEUE_TO_FALLBACK;
     }
 
     ~user()
