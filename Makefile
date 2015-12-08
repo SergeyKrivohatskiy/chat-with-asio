@@ -5,7 +5,7 @@ CFLAGS = -Wall -O2 --std=c++11 -static
 LFLAGS = -L./boost/install_out/lib/ -L./protobuf/install_out/lib/
 LIBS =  -lboost_system -lboost_thread -lprotobuf -lpthread
 
-INCLUDES = -I"./protobuf/install_out/include" -I"./boost/install_out/include"
+INCLUDES = -I"./protobuf/install_out/include" -I"./boost"
 
 MAIN = chat_server
 
