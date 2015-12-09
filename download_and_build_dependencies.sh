@@ -14,11 +14,11 @@ cd ..
 
 #boost
 rm -rf boost
-git clone --recursive https://github.com/boostorg/boost.git
+wget -q http://sourceforge.net/projects/boost/files/boost/1.59.0/boost_1_59_0.tar.bz2
+tar -xf boost_1_59_0.tar.bz2
+rm -f boost_1_59_0.tar.bz2
+mv boost_1_59_0 boost
 cd boost
-git checkout boost-1.59.0 -b boost-1.59.9
-./bootstrap.sh --includedir=$PWD/install_out/include --libdir=/$PWD/install_out/lib
-./bjam ||
-./bjam install ||
-cp -R -f libs/asio/include/* -t install_out/include
+./bootstrap.sh --with-libraries=system,thread,date_time,regex,serialization --prefix=$PWD/install_out toolset=gcc cflags="-Ofast -mtune=native"
+./b2 install
 cd ..
