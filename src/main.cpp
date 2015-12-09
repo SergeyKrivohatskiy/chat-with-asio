@@ -22,7 +22,8 @@ static size_t const INITIAL_BUFFER_SIZE = 1 << 2; // 4 b
 #else
 static size_t const INITIAL_BUFFER_SIZE = 1 << 12; // 4 Kb
 #endif
-static size_t const MESSAGES_IN_QUEUE_TO_FALLBACK = 1 << 12;
+static size_t const MESSAGES_IN_QUEUE_TO_FALLBACK = 1 << 8; // 256
+static size_t const MESSAGES_SUM_SIZE_TO_FALLBACK = 1 << 12; // 4 Kb
 static size_t const MAX_VARINT_BYTES = 10;
 
 class chat_user
@@ -106,6 +107,7 @@ public:
             buffer_offset(0),
             buffer_red(0),
             write_buffer(std::max(INITIAL_BUFFER_SIZE, MAX_VARINT_BYTES)),
+            messages_sum_size(0),
             write_in_progress(false)
     {
     }
@@ -241,7 +243,9 @@ public:
             auto ancor(shared_from_this());
             service.post([this, ancor](){do_write();});
         }
-        return messages_to_deliver.size() >= MESSAGES_IN_QUEUE_TO_FALLBACK;
+        messages_sum_size += message.first;
+        return messages_to_deliver.size() >= MESSAGES_IN_QUEUE_TO_FALLBACK ||
+               messages_sum_size >= MESSAGES_SUM_SIZE_TO_FALLBACK;
     }
 
     ~user()
@@ -292,6 +296,7 @@ private:
 #endif
             memcpy(write_buffer.data() + write_buffer_offset, message.second.get(), message.first);
             write_buffer_offset += message.first;
+            messages_sum_size -= message.first;
             messages_to_deliver.pop();
         }
 
@@ -332,6 +337,7 @@ private:
     std::vector<uint8> write_buffer;
     std::queue<serialized_message> messages_to_deliver;
     boost::mutex deliver_queue_mutex;
+    size_t messages_sum_size;
     bool write_in_progress;
 };
 
