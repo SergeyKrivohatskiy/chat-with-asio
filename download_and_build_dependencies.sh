@@ -18,6 +18,7 @@ git clone --recursive https://github.com/boostorg/boost.git
 cd boost
 git checkout boost-1.59.0 -b boost-1.59.9
 ./bootstrap.sh --includedir=$PWD/install_out/include --libdir=/$PWD/install_out/lib
-./bjam install
-cp -R -f libs/asio/include -t install_out/include
+./bjam ||
+./bjam install ||
+cp -R -f libs/asio/include/* -t install_out/include
 cd ..

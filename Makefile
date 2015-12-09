@@ -1,6 +1,6 @@
 CC = g++
 
-CFLAGS = -Wall -O2 --std=c++11 -static
+CFLAGS = -Wall -Ofast -mtune=native --std=c++11 -static
 
 LFLAGS = -L./boost/install_out/lib/ -L./protobuf/install_out/lib/
 LIBS =  -lboost_system -lboost_thread -lprotobuf -lpthread
