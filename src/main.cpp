@@ -80,13 +80,17 @@ public:
 #endif
     }
 
-    size_t deliver_message_to_all(Message const &message)
+    size_t deliver_message_to_all(Message const &message, chat_user const *from_user)
     {
         serialized_message message_serialized(serialize_message(message));
         size_t overflow_queues = 0;
         rw_mutex.lock_shared();
         for(auto &user_p: users)
         {
+            if (user_p.get() == from_user)
+            {
+                continue;
+            }
             overflow_queues += user_p->deliver_message(message_serialized);
         }
         rw_mutex.unlock_shared();
@@ -204,7 +208,7 @@ public:
             {
                 std::cout << "Command!!" << std::endl;
             } else {
-                size_t busy_factor = chat.deliver_message_to_all(message);
+                size_t busy_factor = chat.deliver_message_to_all(message, this);
                 for (size_t idx = 0; idx < busy_factor; ++idx)
                 {
                     if (!service.poll_one())

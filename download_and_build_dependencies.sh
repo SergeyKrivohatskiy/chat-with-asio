@@ -14,7 +14,7 @@ cd ..
 
 #boost
 rm -rf boost
-wget -q http://sourceforge.net/projects/boost/files/boost/1.59.0/boost_1_59_0.tar.bz2
+wget http://sourceforge.net/projects/boost/files/boost/1.59.0/boost_1_59_0.tar.bz2
 tar -xf boost_1_59_0.tar.bz2
 rm -f boost_1_59_0.tar.bz2
 mv boost_1_59_0 boost
