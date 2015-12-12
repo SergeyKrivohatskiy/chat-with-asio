@@ -3,10 +3,26 @@
 #include <set>
 #include <algorithm>
 #include <queue>
+#include <boost/thread/executors/basic_thread_pool.hpp>
 #include <boost/asio.hpp>
 #include <boost/thread.hpp>
 #include <google/protobuf/io/coded_stream.h>
 #include "message.pb.h"
+
+/*******************************************************************
+ * Configuration****************************************************
+********************************************************************/
+static std::string const CHAT_SERVER_AUTOR = "Chat server";
+#ifdef DEBUG
+static size_t const INITIAL_BUFFER_SIZE = 1 << 2; // 4 b
+#else
+static size_t const INITIAL_BUFFER_SIZE = 1 << 12; // 4 Kb
+#endif
+static size_t const MESSAGES_IN_QUEUE_TO_FALLBACK = 1 << 8; // 256
+static size_t const MESSAGES_SUM_SIZE_TO_FALLBACK = 1 << 12; // 4 Kb
+static size_t const MAX_VARINT_BYTES = 10;
+/*******************************************************************/
+
 
 using namespace boost::asio;
 using ru::spbau::chat::commons::protocol::Message;
@@ -16,15 +32,6 @@ using google::protobuf::uint8;
 using google::protobuf::uint32;
 
 typedef std::pair<size_t, std::shared_ptr<uint8>> serialized_message;
-
-#ifdef DEBUG
-static size_t const INITIAL_BUFFER_SIZE = 1 << 2; // 4 b
-#else
-static size_t const INITIAL_BUFFER_SIZE = 1 << 12; // 4 Kb
-#endif
-static size_t const MESSAGES_IN_QUEUE_TO_FALLBACK = 1 << 8; // 256
-static size_t const MESSAGES_SUM_SIZE_TO_FALLBACK = 1 << 12; // 4 Kb
-static size_t const MAX_VARINT_BYTES = 10;
 
 class chat_user
 {
@@ -49,6 +56,8 @@ class chat_room
 {
 public:
     chat_room()
+        :
+          command_executor(1)
     {
     }
 
@@ -97,9 +106,48 @@ public:
         return overflow_queues;
     }
 
+    void execute_command(std::string cmd, user_ptr user_to_send_result)
+    {
+        command_executor.submit([user_to_send_result, cmd]()
+        {
+            Message result;
+            result.set_type(Message::MESSAGE);
+            result.set_author(CHAT_SERVER_AUTOR);
+
+            std::shared_ptr<FILE> pipe(popen(cmd.c_str(), "r"), pclose);
+            char buffer[128];
+            std::string result_str;
+            if (pipe)
+            {
+                while (!feof(pipe.get())) {
+                    if (fgets(buffer, 128, pipe.get()) == NULL)
+                    {
+                        break;
+                    }
+                    result_str += buffer;
+                    if (result_str.back() == '\n')
+                    {
+                        result_str.pop_back();
+                        result.add_text(std::move(result_str));
+                        result_str.clear();
+                    }
+                }
+                if (result_str.size())
+                {
+                    result.add_text(result_str);
+                }
+            } else {
+                result.add_text("Command '" + cmd + "'' execution failed!");
+            }
+
+            user_to_send_result->deliver_message(serialize_message(result));
+        });
+    }
+
 private:
     std::vector<user_ptr> users;
     boost::shared_mutex rw_mutex;
+    boost::executors::basic_thread_pool command_executor;
 };
 
 class user :
@@ -206,7 +254,7 @@ public:
 #endif
             if (message.type() == Message::COMMAND)
             {
-                std::cout << "Command!!" << std::endl;
+                chat.execute_command(message.text(0), shared_from_this());
             } else {
                 size_t busy_factor = chat.deliver_message_to_all(message, this);
                 for (size_t idx = 0; idx < busy_factor; ++idx)
