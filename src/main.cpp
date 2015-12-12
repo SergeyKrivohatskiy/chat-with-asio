@@ -34,6 +34,17 @@ public:
 };
 typedef std::shared_ptr<chat_user> user_ptr;
 
+serialized_message serialize_message(Message const &message)
+{
+    size_t msg_size = message.ByteSize();
+    size_t size = msg_size + MAX_VARINT_BYTES;
+    std::shared_ptr<uint8> buffer(new uint8[size]);
+    auto it = CodedOutputStream::WriteVarint32ToArray(msg_size, buffer.get());
+    bool written = message.SerializeToArray(it, msg_size);
+    assert(written);
+    return serialized_message(msg_size + (it - buffer.get()), buffer);
+}
+
 class chat_room
 {
 public:
@@ -69,15 +80,9 @@ public:
 #endif
     }
 
-    size_t deliver_message_to_all(std::shared_ptr<Message> const &message)
+    size_t deliver_message_to_all(Message const &message)
     {
-        size_t msg_size = message->ByteSize();
-        size_t size = msg_size + MAX_VARINT_BYTES;
-        std::shared_ptr<uint8> buffer(new uint8[size]);
-        auto it = CodedOutputStream::WriteVarint32ToArray(msg_size, buffer.get());
-        bool written = message->SerializeToArray(it, msg_size);
-        assert(written);
-        serialized_message message_serialized(msg_size + (it - buffer.get()), buffer);
+        serialized_message message_serialized(serialize_message(message));
         size_t overflow_queues = 0;
         rw_mutex.lock_shared();
         for(auto &user_p: users)
@@ -173,10 +178,10 @@ public:
 
         if (buffer_red >= message_size)
         {
-            std::shared_ptr<Message> message(new Message());
+            Message message;
             try
             {
-                message->ParseFromArray(message_buffer.data() + buffer_offset,
+                message.ParseFromArray(message_buffer.data() + buffer_offset,
                                        message_size);
             } catch (std::exception &) {
     #ifdef DEBUG
@@ -190,17 +195,22 @@ public:
 
 #ifdef DEBUG
             std::cout << "message red ["
-                      << (message->has_type() ? message->type() : -1) << ", "
-                      << (message->has_author() ? message->author() : "no author") << ", "
-                      << (message->text_size() ? message->text(0) : "no text")
+                      << (message.has_type() ? message.type() : -1) << ", "
+                      << (message.has_author() ? message.author() : "no author") << ", "
+                      << (message.text_size() ? message.text(0) : "no text")
                       << "]" << std::endl;
 #endif
-            size_t busy_factor = chat.deliver_message_to_all(message);
-            for (size_t idx = 0; idx < busy_factor; ++idx)
+            if (message.type() == Message::COMMAND)
             {
-                if (!service.poll_one())
+                std::cout << "Command!!" << std::endl;
+            } else {
+                size_t busy_factor = chat.deliver_message_to_all(message);
+                for (size_t idx = 0; idx < busy_factor; ++idx)
                 {
-                    break;
+                    if (!service.poll_one())
+                    {
+                        break;
+                    }
                 }
             }
             accept_message_size();
